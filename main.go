@@ -110,10 +110,12 @@ func processBrowser(browser *detector.BrowserInfo, cfg *config.Config, uiInstanc
 		browser.Name,
 	)
 
-	dataSize, err := dataExtractor.GetDataSize()
+	// 一次性获取数据大小和文件数量，避免重复遍历
+	dataSize, totalFiles, err := dataExtractor.GetDataSizeAndCount()
 	if err != nil {
-		logger.Warning("无法计算%s数据大小: %v", browser.Name, err)
+		logger.Warning("无法计算%s数据信息: %v", browser.Name, err)
 		dataSize = 1024 * 1024 * 1024
+		totalFiles = 100
 	}
 
 	requiredSpace := dataSize * int64(config.RequiredDiskSpaceMultiplier)
@@ -123,12 +125,6 @@ func processBrowser(browser *detector.BrowserInfo, cfg *config.Config, uiInstanc
 		if availableSpace < requiredSpace {
 			return "", fmt.Errorf("磁盘空间不足")
 		}
-	}
-
-	totalFiles, err := dataExtractor.CountTotalFiles()
-	if err != nil {
-		logger.Warning("无法计算%s文件数量: %v", browser.Name, err)
-		totalFiles = 100
 	}
 
 	compressor := compressor.NewZipCompressor(browserTempDir, browser.Name)

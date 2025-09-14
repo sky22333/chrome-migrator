@@ -95,51 +95,71 @@ func (e *DataExtractor) SetProgressCallback(callback func(current, total int64, 
 	e.ProgressCallback = callback
 }
 
-// CountTotalFiles 计算需要处理的总文件数
-func (e *DataExtractor) CountTotalFiles() (int64, error) {
-	var totalFiles int64
+// GetDataSizeAndCount 一次遍历同时计算数据大小和文件数量
+func (e *DataExtractor) GetDataSizeAndCount() (int64, int64, error) {
+	var totalSize, totalFiles int64
 	
+	// 处理每个Profile目录
 	for _, profile := range e.Profiles {
 		profileDir := filepath.Join(e.UserDataDir, profile)
 		
+		// 检查关键文件
 		for _, file := range criticalFiles {
 			filePath := filepath.Join(profileDir, file)
-			if _, err := os.Stat(filePath); err == nil {
+			if info, err := os.Stat(filePath); err == nil {
 				totalFiles++
+				totalSize += info.Size()
 			}
 		}
 		
+		// 遍历关键目录
 		for _, dir := range criticalDirs {
 			dirPath := filepath.Join(profileDir, dir)
-			count, _ := e.countFilesInDir(dirPath)
+			size, count := e.calculateDirSizeAndCount(dirPath)
+			totalSize += size
 			totalFiles += count
 		}
 	}
 	
+	// 处理全局文件
 	for _, file := range criticalFiles {
 		filePath := filepath.Join(e.UserDataDir, file)
-		if _, err := os.Stat(filePath); err == nil {
+		if info, err := os.Stat(filePath); err == nil {
 			totalFiles++
+			totalSize += info.Size()
 		}
 	}
 	
 	e.totalFiles = totalFiles
-	return totalFiles, nil
+	return totalSize, totalFiles, nil
 }
 
-// countFilesInDir 计算目录中的文件数量
-func (e *DataExtractor) countFilesInDir(dir string) (int64, error) {
-	var count int64
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+// CountTotalFiles 计算需要处理的总文件数（保持兼容性）
+func (e *DataExtractor) CountTotalFiles() (int64, error) {
+	_, count, err := e.GetDataSizeAndCount()
+	return count, err
+}
+
+// calculateDirSizeAndCount 一次遍历同时计算目录大小和文件数量
+func (e *DataExtractor) calculateDirSizeAndCount(dir string) (int64, int64) {
+	var size, count int64
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
-			return nil // 忽略错误，继续计数
+			return nil // 忽略错误，继续处理
 		}
 		if !info.IsDir() && !e.shouldSkipFile(path) {
 			count++
+			size += info.Size()
 		}
 		return nil
 	})
-	return count, err
+	return size, count
+}
+
+// countFilesInDir 计算目录中的文件数量（保持兼容性）
+func (e *DataExtractor) countFilesInDir(dir string) (int64, error) {
+	_, count := e.calculateDirSizeAndCount(dir)
+	return count, nil
 }
 
 // updateProgress 更新进度
@@ -449,34 +469,13 @@ func (e *DataExtractor) copyDirRecursiveWithProgress(src, dst, baseMessage strin
 }
 
 func (e *DataExtractor) GetDataSize() (int64, error) {
-	var totalSize int64
-
-	for _, profile := range e.Profiles {
-		profileDir := filepath.Join(e.UserDataDir, profile)
-		size, _ := e.calculateDirSize(profileDir)
-		totalSize += size
-	}
-
-	globalSize, _ := e.calculateDirSize(e.UserDataDir)
-	totalSize += globalSize / 10
-
-	return totalSize, nil
+	size, _, err := e.GetDataSizeAndCount()
+	return size, err
 }
 
 func (e *DataExtractor) calculateDirSize(dir string) (int64, error) {
-	var size int64
-
-	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if !info.IsDir() && !e.shouldSkipFile(path) {
-			size += info.Size()
-		}
-		return nil
-	})
-
-	return size, err
+	size, _ := e.calculateDirSizeAndCount(dir)
+	return size, nil
 }
 
 // copyFilesConcurrently 并发复制文件

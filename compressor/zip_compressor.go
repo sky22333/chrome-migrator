@@ -7,15 +7,19 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
 type ZipCompressor struct {
-	OutputPath   string
-	TempDir      string
-	BrowserName  string
+	OutputPath       string
+	TempDir          string
+	BrowserName      string
 	ProgressCallback func(current, total int64, message string)
+	workerCount      int
+	bufferSize       int
 }
 
 func NewZipCompressor(tempDir, browserName string) *ZipCompressor {
@@ -32,6 +36,8 @@ func NewZipCompressor(tempDir, browserName string) *ZipCompressor {
 		OutputPath:  outputPath,
 		TempDir:     tempDir,
 		BrowserName: browserName,
+		workerCount: runtime.NumCPU(),
+		bufferSize:  64 * 1024, // 64KB buffer
 	}
 }
 
@@ -71,17 +77,30 @@ func (c *ZipCompressor) CountFilesToCompress() (int64, error) {
 	return totalFiles, err
 }
 
+type fileTask struct {
+	path    string
+	relPath string
+}
+
 func (c *ZipCompressor) CompressData() error {
 	if err := c.ensureOutputDir(); err != nil {
 		return fmt.Errorf("创建输出目录失败: %v", err)
 	}
 
-	// 计算总文件数
-	var totalFiles int64
+	// 收集所有文件
+	var files []fileTask
 	filepath.Walk(c.TempDir, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() {
-			totalFiles++
+		if err != nil || info.IsDir() {
+			return nil
 		}
+		relPath, err := filepath.Rel(c.TempDir, path)
+		if err != nil {
+			return nil
+		}
+		files = append(files, fileTask{
+			path:    path,
+			relPath: strings.ReplaceAll(relPath, "\\", "/"),
+		})
 		return nil
 	})
 
@@ -94,41 +113,8 @@ func (c *ZipCompressor) CompressData() error {
 	zipWriter := zip.NewWriter(zipFile)
 	defer zipWriter.Close()
 
-	var processedFiles int64
-	err = filepath.Walk(c.TempDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-
-		processedFiles++
-		if c.ProgressCallback != nil {
-			message := fmt.Sprintf("正在压缩 %s 数据...", c.BrowserName)
-			c.ProgressCallback(processedFiles, totalFiles, message)
-		}
-
-		relPath, err := filepath.Rel(c.TempDir, path)
-		if err != nil {
-			return nil
-		}
-
-		relPath = strings.ReplaceAll(relPath, "\\", "/")
-
-		if err := c.addFileToZip(zipWriter, path, relPath); err != nil {
-			return nil
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return fmt.Errorf("压缩数据失败: %v", err)
-	}
-
-	return nil
+	// 并发处理文件
+	return c.compressFilesConcurrently(zipWriter, files)
 }
 
 func (c *ZipCompressor) ensureOutputDir() error {
@@ -136,7 +122,63 @@ func (c *ZipCompressor) ensureOutputDir() error {
 	return os.MkdirAll(outputDir, 0755)
 }
 
-func (c *ZipCompressor) addFileToZip(zipWriter *zip.Writer, filePath, zipPath string) error {
+func (c *ZipCompressor) compressFilesConcurrently(zipWriter *zip.Writer, files []fileTask) error {
+	totalFiles := int64(len(files))
+	var processedFiles int64
+	var mu sync.Mutex
+
+	// 创建工作队列
+	fileChan := make(chan fileTask, c.workerCount*2)
+	errorChan := make(chan error, c.workerCount)
+	var wg sync.WaitGroup
+
+	// 启动工作协程
+	for i := 0; i < c.workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			buffer := make([]byte, c.bufferSize)
+			for task := range fileChan {
+				if err := c.addFileToZip(zipWriter, task.path, task.relPath, buffer, &mu); err != nil {
+					select {
+					case errorChan <- err:
+					default:
+					}
+					continue
+				}
+				
+				mu.Lock()
+				processedFiles++
+				if c.ProgressCallback != nil {
+					message := fmt.Sprintf("正在压缩 %s 数据...", c.BrowserName)
+					c.ProgressCallback(processedFiles, totalFiles, message)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+
+	// 发送任务
+	go func() {
+		defer close(fileChan)
+		for _, file := range files {
+			fileChan <- file
+		}
+	}()
+
+	wg.Wait()
+	close(errorChan)
+
+	// 检查是否有错误
+	select {
+	case err := <-errorChan:
+		return err
+	default:
+		return nil
+	}
+}
+
+func (c *ZipCompressor) addFileToZip(zipWriter *zip.Writer, filePath, zipPath string, buffer []byte, mu *sync.Mutex) error {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return err
@@ -156,12 +198,17 @@ func (c *ZipCompressor) addFileToZip(zipWriter *zip.Writer, filePath, zipPath st
 	header.Name = zipPath
 	header.Method = zip.Deflate
 
+	// 写入zip需要加锁
+	mu.Lock()
 	writer, err := zipWriter.CreateHeader(header)
 	if err != nil {
+		mu.Unlock()
 		return err
 	}
 
-	_, err = io.Copy(writer, file)
+	// 使用缓冲区优化的流式复制
+	_, err = io.CopyBuffer(writer, file, buffer)
+	mu.Unlock()
 	return err
 }
 
