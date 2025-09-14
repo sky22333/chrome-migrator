@@ -110,7 +110,7 @@ func processBrowser(browser *detector.BrowserInfo, cfg *config.Config, uiInstanc
 		browser.Name,
 	)
 
-	// 一次性获取数据大小和文件数量，避免重复遍历
+	// 一次性获取数据大小和文件数量
 	dataSize, totalFiles, err := dataExtractor.GetDataSizeAndCount()
 	if err != nil {
 		logger.Warning("无法计算%s数据信息: %v", browser.Name, err)
