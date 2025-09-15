@@ -41,7 +41,7 @@ func NewZipCompressor(tempDir, browserName string) *ZipCompressor {
 	}
 }
 
-// simplifyBrowserName
+
 func simplifyBrowserName(browserName string) string {
 	switch {
 	case strings.Contains(strings.ToLower(browserName), "chrome"):
@@ -226,4 +226,80 @@ func (c *ZipCompressor) GetCompressedSize() (int64, error) {
 		return 0, err
 	}
 	return info.Size(), nil
+}
+
+// ExtractZip 解压ZIP文件到指定目录
+func (c *ZipCompressor) ExtractZip(zipPath, destDir string, progressCallback func(int, int, string)) error {
+	// 打开ZIP文件
+	reader, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return fmt.Errorf("无法打开ZIP文件: %v", err)
+	}
+	defer reader.Close()
+
+	totalFiles := len(reader.File)
+	processedFiles := 0
+
+	// 创建目标目录
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("无法创建目标目录: %v", err)
+	}
+
+	// 解压每个文件
+	for _, file := range reader.File {
+		if progressCallback != nil {
+			progressCallback(processedFiles, totalFiles, fmt.Sprintf("正在解压: %s", file.Name))
+		}
+
+		if err := c.extractFile(file, destDir); err != nil {
+			return fmt.Errorf("解压文件 %s 失败: %v", file.Name, err)
+		}
+
+		processedFiles++
+	}
+
+	if progressCallback != nil {
+		progressCallback(totalFiles, totalFiles, "解压完成")
+	}
+
+	return nil
+}
+
+// extractFile 解压单个文件
+func (c *ZipCompressor) extractFile(file *zip.File, destDir string) error {
+	// 构建目标路径
+	destPath := filepath.Join(destDir, file.Name)
+
+	// 确保路径安全，防止目录遍历攻击
+	if !strings.HasPrefix(destPath, filepath.Clean(destDir)+string(os.PathSeparator)) {
+		return fmt.Errorf("不安全的文件路径: %s", file.Name)
+	}
+
+	// 如果是目录，创建目录
+	if file.FileInfo().IsDir() {
+		return os.MkdirAll(destPath, file.FileInfo().Mode())
+	}
+
+	// 创建父目录
+	if err := os.MkdirAll(filepath.Dir(destPath), 0755); err != nil {
+		return err
+	}
+
+	// 打开ZIP中的文件
+	rc, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	// 创建目标文件
+	destFile, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, file.FileInfo().Mode())
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	// 复制文件内容
+	_, err = io.Copy(destFile, rc)
+	return err
 }

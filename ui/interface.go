@@ -3,6 +3,7 @@ package ui
 import (
 	"chrome-migrator/config"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -31,6 +32,10 @@ var (
 	warningStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFAA00")).
 			Padding(0, 1)
+
+	progressStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#7D56F4")).
+			Padding(0, 1)
 )
 
 type UI struct {
@@ -52,6 +57,33 @@ func (ui *UI) ShowWelcome() {
 	fmt.Println("• 扩展程序")
 	fmt.Println("• 用户偏好设置")
 	fmt.Println()
+}
+
+func (ui *UI) ShowMainMenu() int {
+	fmt.Println(optionStyle.Render("请选择操作："))
+	fmt.Println()
+	fmt.Println("1. 备份浏览器数据")
+	fmt.Println("2. 还原浏览器数据")
+	fmt.Println("3. 退出程序")
+	fmt.Println()
+
+	for {
+		fmt.Print("请输入选项 (1-3): ")
+		var input string
+		fmt.Scanln(&input)
+
+		switch strings.TrimSpace(input) {
+		case "1":
+			return 1
+		case "2":
+			return 2
+		case "3":
+			return 3
+		default:
+			fmt.Println(errorStyle.Render("无效选项，请输入 1、2 或 3"))
+			continue
+		}
+	}
 }
 
 func (ui *UI) ShowBrowserOptions() config.BrowserType {
@@ -183,23 +215,6 @@ func (ui *UI) ShowRestoreInstructions(outputPaths []string) {
 		fmt.Printf("• %s\n", path)
 	}
 	fmt.Println()
-	fmt.Println(successStyle.Render("数据还原说明:"))
-	fmt.Println("1. 将压缩的备份文件发送到新设备")
-	fmt.Println("2. 将文件解压到以下目录并覆盖:")
-	
-	// 创建路径高亮样式
-	pathStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(lipgloss.Color("#0066CC")).
-		Padding(0, 1).
-		Margin(0, 1)
-	
-	fmt.Printf("   Chrome: %s\n", pathStyle.Render("%LOCALAPPDATA%\\Google\\Chrome\\User Data"))
-	fmt.Printf("   Edge: %s\n", pathStyle.Render("%LOCALAPPDATA%\\Microsoft\\Edge\\User Data"))
-	fmt.Println("3. 重新启动浏览器")
-	fmt.Println()
-	fmt.Println(warningStyle.Render("注意: 请确认所有数据都恢复成功后再清理旧设备"))
-	fmt.Println()
 	fmt.Print("按任意键退出...")
 	fmt.Scanln()
 }
@@ -215,6 +230,93 @@ func formatBytes(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+
+
+func (ui *UI) ShowRestoreBrowserOptions() config.BrowserType {
+	fmt.Println(optionStyle.Render("请选择要还原的浏览器："))
+	fmt.Println()
+	fmt.Println("1. Microsoft Edge")
+	fmt.Println("2. Google Chrome")
+	fmt.Println()
+
+	for {
+		fmt.Print("请输入选项 (1-2): ")
+		var input string
+		fmt.Scanln(&input)
+
+		switch strings.TrimSpace(input) {
+		case "1":
+			return config.BrowserEdge
+		case "2":
+			return config.BrowserChrome
+		default:
+			fmt.Println(errorStyle.Render("无效选项，请输入 1 或 2"))
+			continue
+		}
+	}
+}
+
+func (ui *UI) GetBackupFilePath() string {
+	fmt.Println(optionStyle.Render("请输入备份文件路径："))
+	fmt.Println()
+	fmt.Println("提示：您可以直接拖拽备份文件到此窗口，或手动输入完整路径")
+	fmt.Print("备份文件路径: ")
+	
+	var input string
+	fmt.Scanln(&input)
+	
+	// 处理拖拽文件时可能包含的引号
+	input = strings.Trim(strings.TrimSpace(input), "\"")
+	
+	return input
+}
+
+
+
+// ShowRestoreProgress 显示还原进度
+func (ui *UI) ShowRestoreProgress(current int64, message string) {
+	fmt.Printf("\r%s: %s", progressStyle.Render("进度"), message)
+	if current > 0 {
+		fmt.Printf(" (%d)", current)
+	}
+}
+
+// ShowRestoreWarning 显示还原警告
+func (ui *UI) ShowRestoreWarning() {
+	fmt.Println()
+	fmt.Println(errorStyle.Render("⚠️  重要警告："))
+	fmt.Println()
+	fmt.Println("1. 还原操作将覆盖当前浏览器数据")
+	fmt.Println("2. 请确保已关闭所有浏览器窗口")
+	fmt.Println("3. 建议在还原前备份当前数据")
+	fmt.Println()
+	fmt.Print("确认继续还原？(y/N): ")
+	
+	var input string
+	fmt.Scanln(&input)
+	
+	if strings.ToLower(strings.TrimSpace(input)) != "y" {
+		fmt.Println("还原操作已取消")
+		os.Exit(0)
+	}
+}
+
+// ConfirmKillBrowser 确认是否终止浏览器进程
+func (ui *UI) ConfirmKillBrowser(browserName string) bool {
+	fmt.Println()
+	fmt.Println(errorStyle.Render(fmt.Sprintf("检测到 %s 正在运行", browserName)))
+	fmt.Println()
+	fmt.Println("为了安全还原数据，需要关闭浏览器进程。")
+	fmt.Println("⚠️  这将强制关闭所有浏览器窗口，未保存的数据可能丢失！")
+	fmt.Println()
+	fmt.Print("是否自动关闭浏览器进程？(y/N): ")
+	
+	var input string
+	fmt.Scanln(&input)
+	
+	return strings.ToLower(strings.TrimSpace(input)) == "y"
 }
 
 func (ui *UI) WaitForExit() {

@@ -5,6 +5,7 @@ import (
 	"chrome-migrator/config"
 	"chrome-migrator/detector"
 	"chrome-migrator/extractor"
+	"chrome-migrator/restorer"
 	"chrome-migrator/ui"
 	"chrome-migrator/utils"
 	"fmt"
@@ -21,7 +22,6 @@ func main() {
 	defer logger.Close()
 
 	logger.Info("浏览器数据迁移工具启动")
-	
 	cfg := config.DefaultConfig()
 	
 	if err := ensureDirectories(cfg); err != nil {
@@ -31,7 +31,23 @@ func main() {
 
 	uiInstance := ui.NewUI()
 	uiInstance.ShowWelcome()
+	menuChoice := uiInstance.ShowMainMenu()
 
+	switch menuChoice {
+	case 1:
+		handleBackup(uiInstance, cfg, logger)
+	case 2:
+		handleRestore(uiInstance, logger)
+	case 3:
+		fmt.Println("程序已退出")
+		return
+	}
+
+	uiInstance.WaitForExit()
+}
+
+
+func handleBackup(uiInstance *ui.UI, cfg *config.Config, logger *utils.Logger) {
 	browserType := uiInstance.ShowBrowserOptions()
 	cfg.BrowserType = browserType
 
@@ -39,15 +55,13 @@ func main() {
 	if err != nil {
 		uiInstance.ShowError(fmt.Sprintf("检测浏览器失败: %v", err))
 		logger.Error("检测浏览器失败: %v", err)
-		uiInstance.WaitForExit()
-		os.Exit(1)
+		return
 	}
 
 	if len(browsers) == 0 {
 		uiInstance.ShowError("未找到任何浏览器")
 		logger.Error("未找到任何浏览器")
-		uiInstance.WaitForExit()
-		os.Exit(1)
+		return
 	}
 
 	var outputPaths []string
@@ -93,8 +107,40 @@ func main() {
 	} else {
 		uiInstance.ShowError("没有成功备份任何浏览器数据")
 		logger.Error("没有成功备份任何浏览器数据")
-		uiInstance.WaitForExit()
 	}
+}
+
+
+func handleRestore(uiInstance *ui.UI, logger *utils.Logger) {
+	browserType := uiInstance.ShowRestoreBrowserOptions()
+	dataRestorer := restorer.NewDataRestorer()
+
+	targetDir, err := dataRestorer.GetTargetDirectory(browserType)
+	if err != nil {
+		logger.Error("获取目标目录失败: %v", err)
+		uiInstance.ShowError(fmt.Sprintf("错误: %v", err))
+		return
+	}
+
+	uiInstance.ShowInfo(fmt.Sprintf("目标还原路径: %s", targetDir))
+	backupFilePath := uiInstance.GetBackupFilePath()
+	uiInstance.ShowRestoreWarning()
+
+	dataRestorer.SetProgressCallback(func(current int64, message string) {
+		uiInstance.ShowRestoreProgress(current, message)
+	})
+
+	uiInstance.ShowInfo("开始还原数据...")
+	if err := dataRestorer.RestoreData(backupFilePath, browserType, uiInstance); err != nil {
+		logger.Error("还原数据失败: %v", err)
+		uiInstance.ShowError(fmt.Sprintf("还原失败: %v", err))
+		return
+	}
+
+	fmt.Println()
+	uiInstance.ShowInfo("数据还原完成！")
+	uiInstance.ShowInfo("请重新启动浏览器以使用还原的数据。")
+	logger.Info("数据还原完成")
 }
 
 func processBrowser(browser *detector.BrowserInfo, cfg *config.Config, uiInstance *ui.UI, logger *utils.Logger) (string, error) {

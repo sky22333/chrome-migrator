@@ -39,6 +39,5 @@ func (l *Logger) Debug(format string, args ...interface{}) {
 }
 
 func (l *Logger) Close() error {
-	// 终端输出无需关闭
 	return nil
 }
