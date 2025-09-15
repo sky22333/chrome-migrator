@@ -290,7 +290,7 @@ func (ui *UI) ShowRestoreWarning() {
 	fmt.Println()
 	fmt.Println("1. 还原操作将覆盖当前浏览器数据")
 	fmt.Println("2. 请确保已关闭所有浏览器窗口")
-	fmt.Println("3. 建议在还原前备份当前数据")
+	fmt.Println("3. 请确认还原的数据和选择的浏览器是否一致")
 	fmt.Println()
 	fmt.Print("确认继续还原？(y/N): ")
 	
