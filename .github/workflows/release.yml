@@ -1,0 +1,106 @@
+name: 发布软件包
+
+on:
+  workflow_dispatch:  # 手动触发
+    inputs:
+      version:
+        description: '版本号 (例如: v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: 设置Go环境
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          
+      - name: 获取版本号
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          else
+            VERSION=${{ github.event.inputs.version }}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "版本号: $VERSION"
+          
+      - name: 生成变更日志
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          
+          if [ -n "$PREV_TAG" ]; then
+            echo "changelog<<EOF" >> $GITHUB_OUTPUT
+            echo "## 更新内容" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            git log --pretty=format:"- %s" $PREV_TAG..HEAD >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "changelog=## 首次发布" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: 创建构建目录
+        run: |
+          mkdir -p build
+          
+      - name: 编译二进制文件
+        run: |
+          # Windows AMD64
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o build/chrome-migrator-windows-amd64.exe .
+          
+          # Windows ARM64
+          CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -ldflags="-s -w" -o build/chrome-migrator-windows-arm64.exe .
+          
+      - name: 准备发布文件
+        run: |
+          cd build
+          
+          # 列出生成的文件
+          ls -la *.exe
+          
+      - name: 计算文件校验和
+        run: |
+          cd build
+          sha256sum *.exe > checksums.txt
+          cat checksums.txt
+          
+      - name: 创建或更新Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: "Chrome迁移工具 ${{ steps.version.outputs.version }}"
+          body: |
+            ## 🚀 Chrome 数据迁移工具 ${{ steps.version.outputs.version }}
+            
+            ### 📋 更新内容
+            ${{ steps.changelog.outputs.changelog }}
+            
+            ### 💾 下载说明
+            请根据您的系统架构选择对应的版本，下载后可直接双击运行：
+            
+            ### Windows
+            - **Windows AMD64**: `chrome-migrator-windows-amd64.exe`
+            - **Windows ARM64**: `chrome-migrator-windows-arm64.exe`
+            
+            ## 校验和文件
+            - **SHA256**: `checksums.txt`
+            
+          files: |
+            build/*.exe
+            build/checksums.txt
+          draft: false
+          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
