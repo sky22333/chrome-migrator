@@ -83,12 +83,10 @@ jobs:
           tag_name: ${{ steps.version.outputs.version }}
           name: "Chrome迁移工具 ${{ steps.version.outputs.version }}"
           body: |
-            ## 🚀 Chrome 数据迁移工具 ${{ steps.version.outputs.version }}
             
-            ### 📋 更新内容
             ${{ steps.changelog.outputs.changelog }}
             
-            ### 💾 下载说明
+            ### 下载说明
             请根据您的系统架构选择对应的版本，下载后可直接双击运行：
             
             ### Windows
