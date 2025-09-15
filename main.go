@@ -42,8 +42,6 @@ func main() {
 		fmt.Println("程序已退出")
 		return
 	}
-
-	uiInstance.WaitForExit()
 }
 
 
@@ -141,6 +139,7 @@ func handleRestore(uiInstance *ui.UI, logger *utils.Logger) {
 	uiInstance.ShowInfo("数据还原完成！")
 	uiInstance.ShowInfo("请重新启动浏览器以使用还原的数据。")
 	logger.Info("数据还原完成")
+	uiInstance.WaitForExit()
 }
 
 func processBrowser(browser *detector.BrowserInfo, cfg *config.Config, uiInstance *ui.UI, logger *utils.Logger) (string, error) {
